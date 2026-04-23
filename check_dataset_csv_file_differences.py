@@ -17,13 +17,13 @@ Usage
 -----
 
 Basic comparison (ignores column order):
-    python compare.py file1.csv file2.csv --key ref_org_id
+    python check_csv_file_differences.py file1.csv file2.csv --key ref_org_id
 
 Multi‑column join key:
-    python compare.py file1.csv file2.csv --key ref_org_id activity_start_date
+    python check_csv_file_differences.py file1.csv file2.csv --key ref_org_id activity_start_date
 
 Enable column‑order comparison:
-    python compare.py file1.csv file2.csv --key ref_org_id --check-column-order
+    python check_csv_file_differences.py file1.csv file2.csv --key ref_org_id --check-column-order
 
 Arguments
 ---------
@@ -162,32 +162,41 @@ def compare_csv_datasets(file1, file2, join_keys, check_column_order=False):
 
     merged = df1.merge(df2, on=join_keys, how="inner", suffixes=("_old", "_new"))
 
-    diff_records = []
+    comparison_cols = []
+    match_flag_cols = []
 
     for col in df1.columns:
         if col in join_keys:
             continue
 
-        col_old = col + "_old"
-        col_new = col + "_new"
+        col_old = f"{col}_old"
+        col_new = f"{col}_new"
+        col_match = f"{col}_match"
 
         if col_old in merged.columns and col_new in merged.columns:
-            diffs = merged[merged[col_old] != merged[col_new]]
-            if not diffs.empty:
-                diff_records.append((col, len(diffs)))
+            merged[col_match] = (
+                merged[col_old].eq(merged[col_new]) |
+                (merged[col_old].isna() & merged[col_new].isna())
+            )
 
-    if diff_records:
+            comparison_cols.append(col)
+            match_flag_cols.append(col_match)
+
+    # Keep only rows where at least one column mismatches
+    mismatch_mask = ~merged[match_flag_cols].all(axis=1)
+    value_differences = merged[mismatch_mask]
+
+    if not value_differences.empty:
         print("\n⚠️ Columns with mismatched values:")
-        for col, count in diff_records:
-            print(f" - {col}: {count} differences")
+        for col, flag_col in zip(comparison_cols, match_flag_cols):
+            mismatch_count = (~value_differences[flag_col]).sum()
+            if mismatch_count > 0:
+                print(f" - {col}: {mismatch_count} differences")
 
-        merged.to_csv("value_differences.csv", index=False)
+        value_differences.to_csv("value_differences.csv", index=False)
         print("📄 Exported value differences to 'value_differences.csv'")
     else:
         print("✅ No row-level value differences detected.")
-
-    print("\n✅ Comparison complete.")
-
 
 # ----------------------
 # ✅ Argument Parsing
